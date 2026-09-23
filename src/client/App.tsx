@@ -158,6 +158,90 @@ function DonutChart({ data, size = 130 }: { data: { label: string; value: number
   );
 }
 
+async function fileToAvatarDataUrl(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) throw new Error('Arquivo deve ser imagem');
+  if (file.size > 5 * 1024 * 1024) throw new Error('Máximo 5MB');
+  const bitmap = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Falha ao ler imagem')); };
+    img.src = url;
+  });
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Falha ao processar imagem');
+  const side = Math.min(bitmap.width, bitmap.height);
+  const sx = (bitmap.width - side) / 2;
+  const sy = (bitmap.height - side) / 2;
+  ctx.drawImage(bitmap, sx, sy, side, side, 0, 0, size, size);
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+function Avatar({ src, nome, size = 'md', className = '' }: { src?: string | null; nome: string; size?: 'sm' | 'md' | 'lg'; className?: string }) {
+  const dims = size === 'sm' ? 'w-7 h-7 text-xs' : size === 'lg' ? 'w-20 h-20 text-2xl' : 'w-12 h-12 text-lg';
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={nome}
+        className={`${dims} rounded-full object-cover border border-primary/30 shadow-md flex-shrink-0 ${className}`}
+        draggable={false}
+      />
+    );
+  }
+  return (
+    <div className={`${dims} rounded-full bg-gradient-to-br from-primary to-blue-700 flex items-center justify-center text-white font-bold flex-shrink-0 shadow-md ${className}`}>
+      {(nome || '?').charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+function AvatarUpload({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const handleFile = async (file: File) => {
+    try {
+      onChange(await fileToAvatarDataUrl(file));
+      showToast('Foto de perfil atualizada');
+    } catch (e: any) {
+      showToast(e.message || 'Erro ao processar foto', 'error');
+    }
+  };
+  return (
+    <div className="space-y-2">
+      <label className="label text-card-foreground">Foto de perfil</label>
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          className="relative group cursor-pointer"
+          onClick={() => inputRef.current?.click()}
+          title="Trocar foto"
+        >
+          <Avatar src={value} nome="F" size="lg" />
+          <span className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+            {I.camera}
+          </span>
+        </button>
+        <div className="flex flex-col gap-2">
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => inputRef.current?.click()}>
+            {I.camera} Escolher foto
+          </button>
+          {value && (
+            <button type="button" className="btn btn-outline btn-sm text-destructive" onClick={() => onChange(null)}>
+              {I.trash} Remover
+            </button>
+          )}
+          <p className="text-xs text-muted-foreground">JPG/PNG · até 5MB · recortada em quadrado</p>
+        </div>
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void handleFile(f); e.target.value = ''; }} />
+    </div>
+  );
+}
+
 function ImageUpload({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const handleFile = (file: File) => {
@@ -222,6 +306,13 @@ function pdfBlobUrl(dataUrl: string): string {
 
 function abrirPdf(src: string) {
   const url = pdfBlobUrl(src);
+  const w = window.open(url, '_blank', 'noopener,noreferrer');
+  if (w) {
+    if (url !== src && url.startsWith('blob:')) {
+      setTimeout(() => URL.revokeObjectURL(url), 120_000);
+    }
+    return;
+  }
   const a = document.createElement('a');
   a.href = url;
   a.target = '_blank';
@@ -230,7 +321,7 @@ function abrirPdf(src: string) {
   a.click();
   a.remove();
   if (url !== src && url.startsWith('blob:')) {
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    setTimeout(() => URL.revokeObjectURL(url), 120_000);
   }
 }
 
@@ -294,6 +385,12 @@ function ContractUpload({ value, onChange, label = 'Contrato (PDF)', onImmediate
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [salvando, setSalvando] = useState(false);
+  const openUrl = useMemo(() => (value ? pdfBlobUrl(value) : ''), [value]);
+  useEffect(() => {
+    if (openUrl.startsWith('blob:')) {
+      return () => { try { URL.revokeObjectURL(openUrl); } catch { /* ignore */ } };
+    }
+  }, [openUrl]);
   const handleFile = async (file: File) => {
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
       showToast('Arquivo deve ser PDF', 'error');
@@ -332,7 +429,14 @@ function ContractUpload({ value, onChange, label = 'Contrato (PDF)', onImmediate
           <div className="relative bg-slate-900/40">
             <ContratoPdfFrame src={value} className="w-full h-48 border-0 pointer-events-none" />
             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
-              <button onClick={e => { e.stopPropagation(); abrirPdf(value); }} className="btn btn-outline btn-sm bg-black/40 text-white border-white/30">{I.pdf} Abrir PDF</button>
+              <button type="button" onClick={e => { e.stopPropagation(); abrirPdf(value); }} className="btn btn-outline btn-sm bg-black/40 text-white border-white/30">{I.pdf} Abrir PDF</button>
+              <a
+                href={openUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                className="btn btn-outline btn-sm bg-black/40 text-white border-white/30"
+              >{I.pdf} Nova aba</a>
               <button onClick={e => { e.stopPropagation(); onChange(null); onImmediateSave?.(null); }} className="text-red-400 hover:text-red-300 p-1.5 rounded-lg bg-black/30 hover:bg-black/50 transition">{I.trash}</button>
             </div>
           </div>
@@ -350,6 +454,12 @@ function ContractUpload({ value, onChange, label = 'Contrato (PDF)', onImmediate
 }
 
 function ContratoVisivel({ contrato, compact = false, onUploadClick }: { contrato?: string | null; compact?: boolean; onUploadClick?: () => void }) {
+  const href = useMemo(() => (contrato ? pdfBlobUrl(contrato) : ''), [contrato]);
+  useEffect(() => {
+    if (href && href.startsWith('blob:') && contrato) {
+      return () => { try { URL.revokeObjectURL(href); } catch { /* ignore */ } };
+    }
+  }, [href, contrato]);
   if (!contrato) {
     if (!onUploadClick) return null;
     return (
@@ -359,18 +469,23 @@ function ContratoVisivel({ contrato, compact = false, onUploadClick }: { contrat
       </button>
     );
   }
-  const open = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    abrirPdf(contrato);
-  };
   return (
-    <div className={`contract-preview ${compact ? 'contract-preview-compact' : ''}`} onClick={open} role="button" tabIndex={0} onKeyDown={e => { if (e.key === 'Enter') open(e as any); }} title="Abrir contrato PDF">
+    <a
+      className={`contract-preview ${compact ? 'contract-preview-compact' : ''}`}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={e => e.stopPropagation()}
+      role="button"
+      tabIndex={0}
+      title="Abrir contrato PDF em nova aba"
+    >
       <ContratoPdfFrame src={contrato} className="contract-preview-frame" />
-      <div className="contract-preview-bar">
+      <span className="contract-preview-bar">
         <span className="contract-preview-label">{I.pdf} Contrato do responsável</span>
         <span className="contract-preview-open">Abrir PDF</span>
-      </div>
-    </div>
+      </span>
+    </a>
   );
 }
 
@@ -546,11 +661,12 @@ function FormObs({ coletorId, coletores, onSave, onCancel }: { coletorId?: strin
 }
 
 function FormUsuario({ data, departamentos, onSave, onCancel }: { data?: any; departamentos: string[]; onSave: (d: any) => void; onCancel: () => void }) {
-  const [f, setF] = useState(data || { nome: '', email: '', cargo: 'Operador', departamento: '', status: 'ativo', senha: '' });
+  const [f, setF] = useState(data || { nome: '', email: '', cargo: 'Operador', departamento: '', status: 'ativo', senha: '', foto: null });
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
   return (
     <form onSubmit={e => { e.preventDefault(); onSave(f); }} className="space-y-4">
+      <AvatarUpload value={f.foto ?? null} onChange={v => set('foto', v)} />
       <div><label className="label text-card-foreground">Nome *</label><input className="input mt-1.5" required value={f.nome} onChange={e => set('nome', e.target.value)} placeholder="Nome completo" /></div>
       <div><label className="label text-card-foreground">E-mail / Usuário de login *</label><input className="input mt-1.5" required value={f.email} onChange={e => set('email', e.target.value)} placeholder="admin ou usuario@baeletrica.com" /></div>
       <div>
@@ -596,6 +712,37 @@ function FormUsuario({ data, departamentos, onSave, onCancel }: { data?: any; de
       <div className="flex justify-end gap-2 pt-3 border-t border-border">
         <button type="button" className="btn btn-outline" onClick={onCancel}>Cancelar</button>
         <button type="submit" className="btn btn-primary">{data ? 'Salvar' : 'Criar Usuário'}</button>
+      </div>
+    </form>
+  );
+}
+
+function FormFotoPerfil({ user, onSave, onCancel }: { user: SessionUser; onSave: (foto: string | null) => Promise<void>; onCancel: () => void }) {
+  const [foto, setFoto] = useState<string | null>(user.foto ?? null);
+  const [salvando, setSalvando] = useState(false);
+  return (
+    <form
+      className="space-y-5"
+      onSubmit={async e => {
+        e.preventDefault();
+        setSalvando(true);
+        try { await onSave(foto); onCancel(); }
+        catch { /* toast no pai */ }
+        finally { setSalvando(false); }
+      }}
+    >
+      <div className="flex items-center gap-4">
+        <Avatar src={foto} nome={user.nome} size="lg" />
+        <div className="min-w-0">
+          <p className="font-semibold text-card-foreground truncate">{user.nome}</p>
+          <p className="text-sm text-muted-foreground truncate">{user.email}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{user.cargo}</p>
+        </div>
+      </div>
+      <AvatarUpload value={foto} onChange={setFoto} />
+      <div className="flex justify-end gap-2 pt-3 border-t border-border">
+        <button type="button" className="btn btn-outline" onClick={onCancel} disabled={salvando}>Cancelar</button>
+        <button type="submit" className="btn btn-primary" disabled={salvando}>{salvando ? 'Salvando…' : 'Salvar foto'}</button>
       </div>
     </form>
   );
@@ -798,9 +945,9 @@ function abrirPaginaColetor(id: string, de?: string, ate?: string) {
 }
 
 type PageId = 'dashboard' | 'coletores' | 'detalhe' | 'registros' | 'relatorio' | 'departamentos' | 'usuarios';
-type Usuario = { id: string; nome: string; email: string; cargo: string; departamento: string; status: string; created_at: string; updated_at?: string };
+type Usuario = { id: string; nome: string; email: string; cargo: string; departamento: string; status: string; foto?: string | null; created_at: string; updated_at?: string };
 type DeptoStats = { departamento: string; total: number; ativos: number; manutencao: number };
-type SessionUser = { id: string; nome: string; email: string; cargo: string; departamento: string; status: string };
+type SessionUser = { id: string; nome: string; email: string; cargo: string; departamento: string; status: string; foto?: string | null };
 
 function LoginScreen({ onLogin, dark, toggleDark }: { onLogin: (user: SessionUser, token: string) => void; dark: boolean; toggleDark: () => void }) {
   const [email, setEmail] = useState('');
@@ -1642,7 +1789,12 @@ export default function App() {
       if (modal === 'editarUsuario' && selected) {
         const body = { ...d };
         if (!body.senha) delete body.senha; // não reenvia senha vazia
-        await api(`/api/usuarios/${(selected as any).id}`, { method: 'PUT', body: JSON.stringify(body) });
+        const atualizado = await api(`/api/usuarios/${(selected as any).id}`, { method: 'PUT', body: JSON.stringify(body) });
+        if (sessionUser && atualizado?.id === sessionUser.id) {
+          const next = { ...sessionUser, ...atualizado } as SessionUser;
+          localStorage.setItem('user', JSON.stringify(next));
+          setSessionUser(next);
+        }
         showToast('Usuário atualizado');
       } else {
         await api('/api/usuarios', { method: 'POST', body: JSON.stringify(d) });
@@ -1650,6 +1802,30 @@ export default function App() {
       }
       setModal(null); loadUsuarios();
     } catch (e: any) { showToast(e.message || 'Erro ao salvar usuário', 'error'); }
+  };
+
+  const salvarFotoPerfil = async (foto: string | null) => {
+    if (!sessionUser) return;
+    try {
+      const body: any = {
+        nome: sessionUser.nome,
+        email: sessionUser.email,
+        cargo: sessionUser.cargo,
+        departamento: sessionUser.departamento || '',
+        status: sessionUser.status || 'ativo',
+        foto,
+      };
+      const atualizado = await api(`/api/usuarios/${sessionUser.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      const next = { ...sessionUser, foto: foto ?? null } as SessionUser;
+      if (atualizado) Object.assign(next, atualizado, { foto: foto ?? null });
+      localStorage.setItem('user', JSON.stringify(next));
+      setSessionUser(next);
+      showToast('Foto de perfil salva');
+      void loadUsuarios();
+    } catch (e: any) {
+      showToast(e.message || 'Erro ao salvar foto', 'error');
+      throw e;
+    }
   };
 
   const gerarRelatorio = async () => {
@@ -1843,15 +2019,18 @@ export default function App() {
                 </div>
               )}
               <div className="flex items-center gap-3">
-                <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-primary/10 border border-primary/25" title={`${sessionUser.email} · ${sessionUser.cargo}`}>
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-blue-700 flex items-center justify-center text-white text-xs font-bold shadow-md">
-                    {sessionUser.nome.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="hidden lg:block leading-tight">
+                <button
+                  type="button"
+                  onClick={() => setModal('perfil')}
+                  className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-primary/10 border border-primary/25 hover:border-primary/50 transition cursor-pointer"
+                  title={`${sessionUser.email} · ${sessionUser.cargo} · Clique para editar foto`}
+                >
+                  <Avatar src={sessionUser.foto} nome={sessionUser.nome} size="sm" />
+                  <div className="hidden lg:block leading-tight text-left">
                     <p className="text-xs font-semibold text-foreground">{sessionUser.nome}</p>
                     <p className="text-2xs text-muted-foreground">{sessionUser.cargo}</p>
                   </div>
-                </div>
+                </button>
                 <SinoNotificacoes
                   open={notifsAberto}
                   onOpenChange={fecharDrawerNotifs}
@@ -2323,24 +2502,22 @@ export default function App() {
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                   {usuarios.map((u, i) => (
                     <div key={u.id} className="stat-card animate-fade-in" style={{ animationDelay: `${i * 0.04}s`, '--kpi-accent': '#3b82f6' } as React.CSSProperties}>
-                      <div className="flex items-start gap-4">
-                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-blue-700 flex items-center justify-center text-white font-bold text-lg flex-shrink-0 shadow-lg" style={{ boxShadow: '0 0 16px hsl(var(--glow)/0.35)' }}>
-                          {u.nome.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <h4 className="font-bold text-card-foreground truncate">{u.nome}</h4>
-                              <p className="text-sm text-muted-foreground truncate">{u.email}</p>
+                        <div className="flex items-start gap-4">
+                          <Avatar src={u.foto} nome={u.nome} size="lg" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <h4 className="font-bold text-card-foreground truncate">{u.nome}</h4>
+                                <p className="text-sm text-muted-foreground truncate">{u.email}</p>
+                              </div>
+                              <span className={`badge ${u.status === 'ativo' ? 'badge-success' : 'badge-danger'}`}>{u.status === 'ativo' ? 'Ativo' : 'Inativo'}</span>
                             </div>
-                            <span className={`badge ${u.status === 'ativo' ? 'badge-success' : 'badge-danger'}`}>{u.status === 'ativo' ? 'Ativo' : 'Inativo'}</span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 mt-3">
-                            <span className="badge badge-secondary">{u.cargo}</span>
-                            {u.departamento && <span className="badge badge-info">{u.departamento}</span>}
+                            <div className="flex flex-wrap items-center gap-2 mt-3">
+                              <span className="badge badge-secondary">{u.cargo}</span>
+                              {u.departamento && <span className="badge badge-info">{u.departamento}</span>}
+                            </div>
                           </div>
                         </div>
-                      </div>
                       <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-border">
                         <button onClick={() => { setSelected(u as any); setModal('editarUsuario'); }} className="btn btn-outline btn-sm">{I.edit} Editar</button>
                         <button onClick={() => { setDeleteId({ type: 'usuario', id: u.id }); setModal('confirm'); }} className="btn btn-danger btn-sm">{I.trash} Excluir</button>
@@ -2647,6 +2824,9 @@ export default function App() {
       </Modal>
       <Modal open={modal === 'editarUsuario'} onClose={() => setModal(null)} title="Editar Usuário" desc="Atualize os dados.">
         <FormUsuario data={selected as any} departamentos={departamentos} onSave={saveUsuario} onCancel={() => setModal(null)} />
+      </Modal>
+      <Modal open={modal === 'perfil'} onClose={() => setModal(null)} title="Meu perfil" desc="Atualize sua foto de perfil.">
+        {sessionUser && <FormFotoPerfil user={sessionUser} onSave={salvarFotoPerfil} onCancel={() => setModal(null)} />}
       </Modal>
       <Modal open={modal === 'confirm'} onClose={() => { setModal(null); setDeleteId(null); }} title="Confirmar Exclusão" size="sm">
         <div className="space-y-4">

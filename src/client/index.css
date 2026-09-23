@@ -1363,6 +1363,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); cur
 /* ── Contrato PDF visível ── */
 .contract-preview {
   position: relative;
+  display: block;
   width: 100%;
   max-width: 520px;
   height: 320px;
@@ -1372,6 +1373,8 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); cur
   background: #0b1220;
   box-shadow: 0 8px 24px hsl(0 0% 0% / 0.35);
   cursor: pointer;
+  text-decoration: none;
+  color: inherit;
 }
 .contract-preview:hover { border-color: hsl(var(--glow) / 0.55); }
 .contract-preview-compact {
@@ -1425,6 +1428,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.5); cur
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #e2e8f0;
+  pointer-events: none;
 }
 .contract-preview-label,
 .contract-preview-open {

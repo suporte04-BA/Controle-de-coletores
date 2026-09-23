@@ -33,7 +33,7 @@ export async function getDb(): Promise<Database> {
     db.run(`CREATE TABLE IF NOT EXISTS usuarios (
       id TEXT PRIMARY KEY, nome TEXT NOT NULL, email TEXT UNIQUE NOT NULL,
       cargo TEXT DEFAULT 'Operador', status TEXT DEFAULT 'ativo' CHECK(status IN ('ativo','inativo')),
-      departamento TEXT, senha TEXT, created_at TEXT, updated_at TEXT
+      departamento TEXT, senha TEXT, foto TEXT, created_at TEXT, updated_at TEXT
     )`);
     db.run(`CREATE TABLE IF NOT EXISTS historico (
       id TEXT PRIMARY KEY, coletor_id TEXT NOT NULL, acao TEXT NOT NULL,
@@ -58,6 +58,12 @@ export async function getDb(): Promise<Database> {
       const cols = db.exec("PRAGMA table_info(coletores)");
       const hasContrato = cols.length && cols[0].columns.includes('contrato');
       if (!hasContrato) db.run("ALTER TABLE coletores ADD COLUMN contrato TEXT");
+    } catch { /* ignore */ }
+    // Migração: foto de perfil do usuário
+    try {
+      const cols = db.exec("PRAGMA table_info(usuarios)");
+      const hasFoto = cols.length && cols[0].columns.includes('foto');
+      if (!hasFoto) db.run("ALTER TABLE usuarios ADD COLUMN foto TEXT");
     } catch { /* ignore */ }
     save();
   }

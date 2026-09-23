@@ -345,8 +345,16 @@ async function start() {
   });
 
   // ─── USUÁRIOS ───
+  function validarFoto(foto: unknown): string | null {
+    if (foto == null || foto === '') return null;
+    if (typeof foto !== 'string') throw new Error('Foto inválida');
+    if (!foto.startsWith('data:image/')) throw new Error('Foto deve ser imagem (data URL)');
+    if (foto.length > 3 * 1024 * 1024) throw new Error('Foto muito grande (máx ~2MB após compressão)');
+    return foto;
+  }
+
   app.get('/api/usuarios', (_req, res) => {
-    const rows = query('SELECT id, nome, email, cargo, departamento, status, created_at, updated_at FROM usuarios ORDER BY nome');
+    const rows = query('SELECT id, nome, email, cargo, departamento, status, foto, created_at, updated_at FROM usuarios ORDER BY nome');
     res.json(rows);
   });
 
@@ -354,13 +362,16 @@ async function start() {
     const { nome, email, cargo, departamento, status, senha } = req.body;
     if (!nome || !email) return res.status(400).json({ error: 'Nome e email são obrigatórios' });
     if (!senha || String(senha).length < 4) return res.status(400).json({ error: 'Senha obrigatória (mínimo 4 caracteres)' });
+    let foto: string | null = null;
+    try { foto = validarFoto(req.body.foto); }
+    catch (e: any) { return res.status(400).json({ error: e.message }); }
     const dup = query('SELECT id FROM usuarios WHERE email = ?', [email]);
     if (dup.length) return res.status(409).json({ error: 'Já existe um usuário com este e-mail' });
     const id = randomUUID();
     const now = new Date().toISOString();
-    run(`INSERT INTO usuarios (id, nome, email, cargo, departamento, status, senha, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?)`,
-      [id, nome, email, cargo || 'Operador', departamento || '', status || 'ativo', hashSenha(String(senha)), now, now]);
+    run(`INSERT INTO usuarios (id, nome, email, cargo, departamento, status, senha, foto, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [id, nome, email, cargo || 'Operador', departamento || '', status || 'ativo', hashSenha(String(senha)), foto, now, now]);
     const { senha: _, ...safe } = query('SELECT * FROM usuarios WHERE id = ?', [id])[0];
     res.json(safe);
   });
@@ -374,8 +385,13 @@ async function start() {
     if (dup.length) return res.status(409).json({ error: 'Já existe outro usuário com este e-mail' });
     let senhaHash = existing[0].senha;
     if (senha && String(senha).length >= 4) senhaHash = hashSenha(String(senha));
-    run(`UPDATE usuarios SET nome=?, email=?, cargo=?, departamento=?, status=?, senha=?, updated_at=? WHERE id=?`,
-      [nome, email, cargo || 'Operador', departamento || '', status || 'ativo', senhaHash, new Date().toISOString(), req.params.id]);
+    let foto: string | null = existing[0].foto ?? null;
+    if ('foto' in req.body) {
+      try { foto = validarFoto(req.body.foto); }
+      catch (e: any) { return res.status(400).json({ error: e.message }); }
+    }
+    run(`UPDATE usuarios SET nome=?, email=?, cargo=?, departamento=?, status=?, senha=?, foto=?, updated_at=? WHERE id=?`,
+      [nome, email, cargo || 'Operador', departamento || '', status || 'ativo', senhaHash, foto, new Date().toISOString(), req.params.id]);
     const { senha: _, ...safe } = query('SELECT * FROM usuarios WHERE id = ?', [req.params.id])[0];
     res.json(safe);
   });
