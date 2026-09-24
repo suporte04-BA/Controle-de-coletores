@@ -7,9 +7,11 @@ node_modules/
 dist/
 build/
 
-# Database
+# Database (banco de produção fora da raiz; backups versionados)
 *.sqlite
 *.sqlite-journal
+!backups/*.sqlite
+!backups/*.json
 
 # Environment
 .env

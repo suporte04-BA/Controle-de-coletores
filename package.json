@@ -8,6 +8,7 @@
     "dev:server": "tsx watch src/server/index.ts",
     "dev:client": "vite",
     "seed": "tsx src/server/seed.ts",
+    "backup": "node scripts/backup.mjs",
     "check": "node scripts/check.mjs && tsc --noEmit",
     "check:fast": "node scripts/check.mjs",
     "typecheck": "tsc --noEmit"
